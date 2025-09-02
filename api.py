@@ -142,9 +142,6 @@ async def process_audio(file: UploadFile = File(...)):
     Accept a WAV file, transcribe it, generate a ragebait text, and
     synthesize it to WAV using Piper.
     """
-    if file.content_type != "audio/wav":
-        raise HTTPException(status_code=400, detail="Only WAV files are supported")
-
     audio_bytes = await file.read()
     logger.info(f"Received audio file: {file.filename}, size: {len(audio_bytes)} bytes")
 
