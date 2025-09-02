@@ -4,12 +4,17 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    poetry2nix = {
+      url = "github:nix-community/poetry2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
     self,
     nixpkgs,
     flake-utils,
+    poetry2nix,
   }: (
     flake-utils.lib.eachDefaultSystem
     (system: let
@@ -21,9 +26,12 @@
           # cudaSupport = true;
         };
       };
+
+      inherit (poetry2nix.lib.mkPoetry2Nix { inherit pkgs; }) mkPoetryApplication;
     in {
       packages = {
-        default = {}; # TODO: Add package here
+        ragebaiter = mkPoetryApplication {projectDir = ./.;};
+        default = self.packages.${system}.ragebaiter;
       };
 
       apps = {
@@ -34,31 +42,13 @@
       };
 
       devShells.default = pkgs.mkShell {
-        nativeBuildInputs = [];
-
         buildInputs = with pkgs; [
-          python312
-          openai-whisper
-          piper-tts
           libopus
           ffmpeg
         ];
 
-        packages = [
-          (pkgs.python3.withPackages (python-pkgs:
-            with python-pkgs; [
-              fastapi
-              numpy
-              ollama
-              python-multipart
-              pydub
-              uvicorn
-              aiohttp
-            ]))
-        ];
-
         shellHook = ''
-            export LD_LIBRARY_PATH=${pkgs.libopus}/lib:${pkgs.ffmpeg}/lib:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=${pkgs.libopus}/lib:${pkgs.ffmpeg}/lib:$LD_LIBRARY_PATH
         '';
       };
     })

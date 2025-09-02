@@ -1,0 +1,28 @@
+[project]
+name = "ragebaiter"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Alex Jercan",email = "jercan_alex27@yahoo.com"}
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi (>=0.116.1,<0.117.0)",
+    "uvicorn (>=0.35.0,<0.36.0)",
+    "numpy (>=2.3.2,<3.0.0)",
+    "ollama (>=0.5.3,<0.6.0)",
+    "python-multipart (>=0.0.20,<0.0.21)",
+    "aiohttp (>=3.12.15,<4.0.0)",
+    "piper (>=0.14.4,<0.15.0)",
+    "py-cord[voice] (>=2.6.1,<3.0.0)",
+    "audioop-lts (>=0.2.2,<0.3.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

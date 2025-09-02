@@ -9,7 +9,7 @@ import discord
 # Configuration
 # ----------------------------
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-TESTING_GUILD_ID = 1412415259683196970
+TESTING_GUILD_ID = int(os.getenv("TESTING_GUILD_ID", "1412415259683196970"))
 RAGEBAITER_API_URL = os.getenv("RAGEBAITER_API_URL", "http://localhost:8000")
 
 # ----------------------------
