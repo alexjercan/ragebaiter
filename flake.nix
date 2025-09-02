@@ -40,6 +40,8 @@
           python312
           openai-whisper
           piper-tts
+          libopus
+          ffmpeg
         ];
 
         packages = [
@@ -51,8 +53,13 @@
               python-multipart
               pydub
               uvicorn
+              aiohttp
             ]))
         ];
+
+        shellHook = ''
+            export LD_LIBRARY_PATH=${pkgs.libopus}/lib:${pkgs.ffmpeg}/lib:$LD_LIBRARY_PATH
+        '';
       };
     })
   );

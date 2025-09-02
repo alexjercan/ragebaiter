@@ -81,12 +81,12 @@ def chunk_and_transcribe(audio_bytes: bytes, model) -> str:
 
 
 def ragebait(transcript: str) -> str:
-    prompt = f"""You are a sarcastic, rage-bait meme bot.
-Your job is to take the following transcript and roast it with dark humor, sarcasm, or meme-style commentary.
-Keep it short, punchy, and funny — like something you'd post as a meme caption or a trolling reply.
-Do not explain yourself, just output the roast. Maximum 200 characters. Make sure to use some emojis and slang.
+    prompt = f"""Ești un bot sarcastic, care provoacă furie prin meme-uri.
+Treaba ta este să iei următorul transcript și să-l faci praf cu umor negru, sarcasm sau comentarii de tip meme.
+Fii scurt, la obiect și amuzant — ca și cum ai posta o legendă de meme sau un răspuns de trolling.
+Nu te explica, doar dă roast-ul. Maxim 200 de caractere. Folosește emoji-uri și slang.
 Transcript: ```{transcript}```
-Raspunsul trebuie sa fie in limba romana."""
+Răspunsul trebuie să fie în limba română."""
 
     response = chat(
         model="gemma3:1b",
@@ -106,8 +106,8 @@ Raspunsul trebuie sa fie in limba romana."""
 
 @app.post("/bait")
 async def process_audio(file: UploadFile = File(...)):
-    if file.content_type != "audio/mpeg":
-        raise HTTPException(status_code=400, detail="Only MP3 files are allowed")
+    if file.content_type != "audio/wav":
+        raise HTTPException(status_code=400, detail="Only WAV files are supported")
 
     audio_bytes = await file.read()
 
