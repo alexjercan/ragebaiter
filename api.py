@@ -30,6 +30,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_DURATION_MS = 30_000  # Max chunk duration for transcription in ms
 SAMPLE_RATE = 16000
 AUDIO_STORAGE = {}  # In-memory storage of generated audio
+MODEL_NAME = os.getenv("MODEL_NAME", "gemma3:latest")
 
 # ----------------------------
 # FastAPI app initialization
@@ -124,7 +125,7 @@ Transcript: ```{transcript}```
 Răspunsul trebuie să fie în limba română."""
 
     response = chat(
-        model="gemma3:1b",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
     )
     text = response.message.content

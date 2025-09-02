@@ -45,10 +45,11 @@
         buildInputs = with pkgs; [
           libopus
           ffmpeg
+          triton-llvm
         ];
 
         shellHook = ''
-          export LD_LIBRARY_PATH=${pkgs.libopus}/lib:${pkgs.ffmpeg}/lib:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=${pkgs.libopus}/lib:${pkgs.ffmpeg}/lib:${pkgs.gcc.cc.lib}/lib:$LD_LIBRARY_PATH
         '';
       };
     })

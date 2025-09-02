@@ -1,3 +1,4 @@
+import random
 import io
 import os
 import logging
@@ -34,7 +35,9 @@ if not discord.opus.is_loaded():
 intents = discord.Intents.default()
 intents.voice_states = True
 bot = discord.Bot(intents=intents)
-connections = {}  # Tracks active recordings per guild
+
+connections = {}   # guild_id -> voice client
+ragebait_tasks = {}  # guild_id -> asyncio.Task
 
 
 # ----------------------------
@@ -42,84 +45,77 @@ connections = {}  # Tracks active recordings per guild
 # ----------------------------
 @bot.event
 async def on_ready():
-    """Triggered when the bot is ready."""
     logger.info(f"Logged in as {bot.user}")
 
 
 # ----------------------------
-# Slash commands
+# Commands
 # ----------------------------
 @bot.slash_command(guild_ids=[TESTING_GUILD_ID])
 async def hello(ctx):
-    """Simple hello command for testing."""
-    logger.info(f"Hello command invoked by {ctx.author}")
     await ctx.respond("Hello!")
 
 
 @bot.slash_command(guild_ids=[TESTING_GUILD_ID])
-async def join(ctx):
-    """Join the voice channel of the user."""
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        logger.info(f"{ctx.author} requested bot to join {channel.name}")
-        await channel.connect()
-        await ctx.respond(f"Joined {channel.name}")
-        logger.info(f"Connected to voice channel: {channel.name}")
-    else:
-        logger.warning(f"{ctx.author} tried to join, but is not in a voice channel")
-        await ctx.respond("You are not in a voice channel.")
+async def ragebait(ctx):
+    """Start the ragebait loop in your voice channel."""
+    logger.info(f"Ragebait command invoked by {ctx.author}")
 
-
-@bot.slash_command(guild_ids=[TESTING_GUILD_ID])
-async def leave(ctx):
-    """Leave the current voice channel."""
-    logger.info(f"Leave command invoked by {ctx.author}")
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.respond("Disconnected from the voice channel.")
-        logger.info("Disconnected from voice channel.")
-    else:
-        logger.warning("Bot is not in a voice channel")
-        await ctx.respond("I am not in a voice channel.")
-
-
-@bot.slash_command(guild_ids=[TESTING_GUILD_ID])
-async def record(ctx):
-    """Start recording audio in the current voice channel."""
-    logger.info(f"Record command invoked by {ctx.author}")
-
-    if ctx.guild.id in connections:
-        logger.warning("Already recording in this guild")
-        await ctx.respond("I am already recording in this guild.")
+    if ctx.guild.id in ragebait_tasks:
+        await ctx.respond("⚠️ Ragebait is already running in this server.")
         return
 
-    if not ctx.voice_client:
-        logger.warning("Bot is not in a voice channel")
-        await ctx.respond("Use /join to make me join a voice channel first.")
+    if not ctx.author.voice:
+        await ctx.respond("❌ You need to be in a voice channel to use this.")
         return
 
-    vc = ctx.voice_client
+    # Join voice if not already in
+    if ctx.voice_client is None:
+        vc = await ctx.author.voice.channel.connect()
+    else:
+        vc = ctx.voice_client
+
     connections[ctx.guild.id] = vc
-    vc.start_recording(discord.sinks.WaveSink(), once_done, ctx.channel, vc)
-    await ctx.respond("Started recording!")
-    logger.info(f"Started recording in guild: {ctx.guild.id}")
+    await ctx.respond("🎙️ Ragebait started! I'll record randomly every few minutes.")
+
+    # Start background task
+    task = asyncio.create_task(ragebait_loop(ctx.guild.id, ctx.channel, vc))
+    ragebait_tasks[ctx.guild.id] = task
 
 
-@bot.command(guild_ids=[TESTING_GUILD_ID])
-async def stop_recording(ctx):
-    """Stop recording audio."""
-    logger.info(f"Stop recording command invoked by {ctx.author}")
-
-    if ctx.guild.id not in connections:
-        logger.warning("No active recording in this guild")
-        await ctx.respond("I am not recording in this guild.")
+@bot.slash_command(guild_ids=[TESTING_GUILD_ID])
+async def stopragebait(ctx):
+    """Stop the ragebait loop."""
+    if ctx.guild.id not in ragebait_tasks:
+        await ctx.respond("⚠️ Ragebait is not running here.")
         return
 
-    vc = connections[ctx.guild.id]
-    vc.stop_recording()
-    del connections[ctx.guild.id]
-    await ctx.delete()
-    logger.info("Stopped recording and cleared connection")
+    ragebait_tasks[ctx.guild.id].cancel()
+    del ragebait_tasks[ctx.guild.id]
+    await ctx.respond("🛑 Ragebait stopped.")
+
+
+# ----------------------------
+# Ragebait loop
+# ----------------------------
+async def ragebait_loop(guild_id, channel, vc):
+    try:
+        while True:
+            wait_time = random.randint(300, 900)  # 5–15 min
+            logger.info(f"Waiting {wait_time}s before next recording in guild {guild_id}")
+            await asyncio.sleep(wait_time)
+
+            record_duration = random.randint(10, 60)  # 10–60 sec
+            logger.info(f"Recording {record_duration}s in guild {guild_id}")
+
+            sink = discord.sinks.WaveSink()
+            vc.start_recording(sink, once_done, channel, vc)
+
+            await asyncio.sleep(record_duration)
+            if vc.recording:
+                vc.stop_recording()
+    except asyncio.CancelledError:
+        logger.info(f"Ragebait loop cancelled in guild {guild_id}")
 
 
 # ----------------------------
@@ -128,30 +124,31 @@ async def stop_recording(ctx):
 async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, *args):
     """Callback executed after recording is finished."""
     recorded_users = [f"<@{user_id}>" for user_id, audio in sink.audio_data.items()]
-    files = [
-        discord.File(audio.file, f"{user_id}.{sink.encoding}")
-        for user_id, audio in sink.audio_data.items()
-    ]
-
-    await channel.send(
-        f"Finished recording audio for: {', '.join(recorded_users)}.", files=files
-    )
     logger.info(f"Finished recording for users: {recorded_users}")
 
-    await send_audio_to_api(sink, vc)
-
-
-async def send_audio_to_api(sink: discord.sinks, vc):
-    """Send recorded audio to the RageBaiter API and play synthesized audio."""
-    form_data = aiohttp.FormData()
+    # Merge all user audios
+    merged_audio = None
     for user_id, audio in sink.audio_data.items():
-        audio.file.seek(0)
-        form_data.add_field(
-            name="file",
-            value=audio.file,
-            filename=f"{user_id}.{sink.encoding}",
-            content_type="audio/wav",
-        )
+        # TODO: make this ok
+        merged_audio = audio.file
+        break
+
+    if merged_audio is None:
+        logger.warning("No audio recorded.")
+        return
+
+    # Send merged audio
+    await send_audio_to_api(merged_audio, vc)
+
+
+async def send_audio_to_api(file_obj, vc):
+    form_data = aiohttp.FormData()
+    form_data.add_field(
+        name="file",
+        value=file_obj,
+        filename="conversation.wav",
+        content_type="audio/wav",
+    )
 
     async with aiohttp.ClientSession() as session:
         async with session.post(RAGEBAITER_API_URL + "/bait", data=form_data) as resp:
@@ -165,15 +162,11 @@ async def send_audio_to_api(sink: discord.sinks, vc):
                 if wav_resp.status == 200:
                     audio_bytes = await wav_resp.read()
                     await play_audio(vc, audio_bytes)
-                    logger.info("Playing synthesized audio")
                 else:
-                    logger.error(
-                        f"Failed to retrieve synthesized audio, status: {wav_resp.status}"
-                    )
+                    logger.error(f"Failed to retrieve synthesized audio, status: {wav_resp.status}")
 
 
 async def play_audio(vc, audio_bytes: bytes):
-    """Play audio directly from bytes in a Discord voice channel."""
     audio_io = io.BytesIO(audio_bytes)
     audio_io.seek(0)
     source = discord.FFmpegPCMAudio(audio_io, pipe=True)
