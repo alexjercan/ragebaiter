@@ -1,10 +1,13 @@
-import random
-import io
-import os
-import logging
-import asyncio
 import aiohttp
+import asyncio
 import discord
+import dotenv
+import io
+import logging
+import os
+import random
+
+dotenv.load_dotenv()
 
 # ----------------------------
 # Configuration
@@ -36,7 +39,7 @@ intents = discord.Intents.default()
 intents.voice_states = True
 bot = discord.Bot(intents=intents)
 
-connections = {}   # guild_id -> voice client
+connections = {}  # guild_id -> voice client
 ragebait_tasks = {}  # guild_id -> asyncio.Task
 
 
@@ -102,7 +105,9 @@ async def ragebait_loop(guild_id, channel, vc):
     try:
         while True:
             wait_time = random.randint(300, 900)  # 5–15 min
-            logger.info(f"Waiting {wait_time}s before next recording in guild {guild_id}")
+            logger.info(
+                f"Waiting {wait_time}s before next recording in guild {guild_id}"
+            )
             await asyncio.sleep(wait_time)
 
             record_duration = random.randint(10, 60)  # 10–60 sec
@@ -163,7 +168,9 @@ async def send_audio_to_api(file_obj, vc):
                     audio_bytes = await wav_resp.read()
                     await play_audio(vc, audio_bytes)
                 else:
-                    logger.error(f"Failed to retrieve synthesized audio, status: {wav_resp.status}")
+                    logger.error(
+                        f"Failed to retrieve synthesized audio, status: {wav_resp.status}"
+                    )
 
 
 async def play_audio(vc, audio_bytes: bytes):
