@@ -5,6 +5,7 @@ import wave
 import logging
 import subprocess
 from pathlib import Path
+from typing import List
 
 import torch
 import numpy as np
@@ -137,16 +138,29 @@ Răspunsul trebuie să fie în limba română."""
 # API endpoints
 # ----------------------------
 @app.post("/bait")
-async def process_audio(file: UploadFile = File(...)):
+async def process_audio(files: List[UploadFile] = File(...)):
     """
     Accept a WAV file, transcribe it, generate a ragebait text, and
     synthesize it to WAV using Piper.
     """
-    audio_bytes = await file.read()
-    logger.info(f"Received audio file: {file.filename}, size: {len(audio_bytes)} bytes")
+    full_transcript_parts = []
+    for file in files:
+        audio_bytes = await file.read()
+        logger.info(
+            f"Received audio file: {file.filename}, size: {len(audio_bytes)} bytes"
+        )
 
-    # Transcription
-    transcript = chunk_and_transcribe(audio_bytes, whisper_model)
+        # Transcription
+        transcript = chunk_and_transcribe(audio_bytes, whisper_model)
+
+        # Use filename (without extension) as username
+        username = file.filename.rsplit(".", 1)[0]
+
+        # Build per-user transcript entry
+        full_transcript_parts.append(f"{username}: {transcript}")
+
+    # Join all transcripts
+    transcript = "\n".join(full_transcript_parts)
 
     # Generate ragebait text
     text = ragebait(transcript)
@@ -161,7 +175,9 @@ async def process_audio(file: UploadFile = File(...)):
     AUDIO_STORAGE[audio_storage_id] = buffer.getvalue()
     logger.info(f"Generated audio stored with ID: {audio_storage_id}")
 
-    return JSONResponse(content={"text": text, "id": str(audio_storage_id)})
+    return JSONResponse(
+        content={"transcript": transcript, "text": text, "id": str(audio_storage_id)}
+    )
 
 
 @app.get("/audio/{audio_id}")

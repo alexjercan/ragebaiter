@@ -97,6 +97,37 @@ async def stopragebait(ctx):
     del ragebait_tasks[ctx.guild.id]
     await ctx.respond("🛑 Ragebait stopped.")
 
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        del connections[ctx.guild.id]
+        logger.info("Disconnected from voice channel.")
+
+
+@bot.slash_command(guild_ids=[TESTING_GUILD_ID])
+async def debugragebait(ctx):
+    """ Join the channel record for 10 seconds and leave"""
+    logger.info(f"DebugRagebait command invoked by {ctx.author}")
+
+    if not ctx.author.voice:
+        await ctx.respond("❌ You need to be in a voice channel to use this.")
+        return
+
+    # Join voice if not already in
+    if ctx.voice_client is None:
+        vc = await ctx.author.voice.channel.connect()
+    else:
+        vc = ctx.voice_client
+
+    connections[ctx.guild.id] = vc
+    await ctx.respond("🎙️ DebugRagebait started! I'll record for 10 seconds.")
+
+    sink = discord.sinks.WaveSink()
+    vc.start_recording(sink, once_done, ctx.channel, vc, True, True)
+
+    await asyncio.sleep(10)
+    if vc.recording:
+        vc.stop_recording()
+
 
 # ----------------------------
 # Ragebait loop
@@ -114,7 +145,7 @@ async def ragebait_loop(guild_id, channel, vc):
             logger.info(f"Recording {record_duration}s in guild {guild_id}")
 
             sink = discord.sinks.WaveSink()
-            vc.start_recording(sink, once_done, channel, vc)
+            vc.start_recording(sink, once_done, channel, vc, False, False)
 
             await asyncio.sleep(record_duration)
             if vc.recording:
@@ -126,34 +157,20 @@ async def ragebait_loop(guild_id, channel, vc):
 # ----------------------------
 # Recording callbacks
 # ----------------------------
-async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, *args):
-    """Callback executed after recording is finished."""
+async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, leave: bool, verbose: bool, *args):
+    """Send recorded audio to the RageBaiter API and play synthesized audio."""
     recorded_users = [f"<@{user_id}>" for user_id, audio in sink.audio_data.items()]
     logger.info(f"Finished recording for users: {recorded_users}")
 
-    # Merge all user audios
-    merged_audio = None
-    for user_id, audio in sink.audio_data.items():
-        # TODO: make this ok
-        merged_audio = audio.file
-        break
-
-    if merged_audio is None:
-        logger.warning("No audio recorded.")
-        return
-
-    # Send merged audio
-    await send_audio_to_api(merged_audio, vc)
-
-
-async def send_audio_to_api(file_obj, vc):
     form_data = aiohttp.FormData()
-    form_data.add_field(
-        name="file",
-        value=file_obj,
-        filename="conversation.wav",
-        content_type="audio/wav",
-    )
+    for user_id, audio in sink.audio_data.items():
+        audio.file.seek(0)
+        form_data.add_field(
+            name="files",
+            value=audio.file,
+            filename=f"{user_id}.{sink.encoding}",
+            content_type="audio/wav"
+        )
 
     async with aiohttp.ClientSession() as session:
         async with session.post(RAGEBAITER_API_URL + "/bait", data=form_data) as resp:
@@ -163,14 +180,25 @@ async def send_audio_to_api(file_obj, vc):
 
             data = await resp.json()
             wav_id = data.get("id")
+            if verbose:
+                transcript = data.get("transcript")
+                text = data.get("text")
+                await channel.send(f"**Transcript:**\n{transcript}\n\n**Ragebait Text:**\n{text}")
+                logger.info(f"Transcript: {transcript}")
+                logger.info(f"Ragebait Text: {text}")
+
             async with session.get(RAGEBAITER_API_URL + f"/audio/{wav_id}") as wav_resp:
                 if wav_resp.status == 200:
                     audio_bytes = await wav_resp.read()
                     await play_audio(vc, audio_bytes)
+                    logger.info("Playing synthesized audio")
                 else:
-                    logger.error(
-                        f"Failed to retrieve synthesized audio, status: {wav_resp.status}"
-                    )
+                    logger.error(f"Failed to retrieve synthesized audio, status: {wav_resp.status}")
+
+    if leave:
+        await vc.disconnect()
+        del connections[channel.guild.id]
+        logger.info("Disconnected from voice channel.")
 
 
 async def play_audio(vc, audio_bytes: bytes):
