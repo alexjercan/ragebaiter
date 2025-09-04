@@ -1,3 +1,4 @@
+from copy import deepcopy
 import aiohttp
 import asyncio
 import discord
@@ -106,7 +107,7 @@ async def stopragebait(ctx):
 
 @bot.slash_command(guild_ids=[TESTING_GUILD_ID])
 async def debugragebait(ctx):
-    """ Join the channel record for 10 seconds and leave"""
+    """Join the channel record for 10 seconds and leave"""
     logger.info(f"DebugRagebait command invoked by {ctx.author}")
 
     if not ctx.author.voice:
@@ -158,10 +159,23 @@ async def ragebait_loop(guild_id, channel, vc):
 # ----------------------------
 # Recording callbacks
 # ----------------------------
-async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, leave: bool, verbose: bool, *args):
+async def once_done(
+    sink: discord.sinks,
+    channel: discord.TextChannel,
+    vc,
+    leave: bool,
+    verbose: bool,
+    *args,
+):
     """Send recorded audio to the RageBaiter API and play synthesized audio."""
     recorded_users = [f"<@{user_id}>" for user_id, audio in sink.audio_data.items()]
     logger.info(f"Finished recording for users: {recorded_users}")
+
+    if verbose:
+        files = [
+            discord.File(deepcopy(audio.file), f"{user_id}.{sink.encoding}")
+            for user_id, audio in sink.audio_data.items()
+        ]
 
     form_data = aiohttp.FormData()
     for user_id, audio in sink.audio_data.items():
@@ -170,31 +184,45 @@ async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, leave
             name="files",
             value=audio.file,
             filename=f"{user_id}.{sink.encoding}",
-            content_type="audio/wav"
+            content_type="audio/wav",
         )
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(RAGEBAITER_API_URL + "/bait", data=form_data, params={"language": RAGEBAITER_LANGUAGE}) as resp:
+        async with session.post(
+            RAGEBAITER_API_URL + "/bait",
+            data=form_data,
+            params={"language": RAGEBAITER_LANGUAGE},
+        ) as resp:
             if resp.status != 200:
                 logger.error(f"Failed to send audio to API, status: {resp.status}")
                 return
 
             data = await resp.json()
             wav_id = data.get("id")
-            if verbose:
-                transcript = data.get("transcript")
-                text = data.get("text")
-                await channel.send(f"**Transcript:**\n{transcript}\n\n**Ragebait Text:**\n{text}")
-                logger.info(f"Transcript: {transcript}")
-                logger.info(f"Ragebait Text: {text}")
 
             async with session.get(RAGEBAITER_API_URL + f"/audio/{wav_id}") as wav_resp:
                 if wav_resp.status == 200:
                     audio_bytes = await wav_resp.read()
+
+                    if verbose:
+                        transcript = data.get("transcript")
+                        text = data.get("text")
+                        file = discord.File(io.BytesIO(audio_bytes), f"ragebait.{sink.encoding}")
+
+                        await channel.send(
+                            f"**Transcript:**\n{transcript}\n\n**Ragebait Text:**\n{text}",
+                            files=files + [file],
+                        )
+                        logger.info(f"Transcript: {transcript}")
+                        logger.info(f"Ragebait Text: {text}")
+
                     await play_audio(vc, audio_bytes)
                     logger.info("Playing synthesized audio")
+
                 else:
-                    logger.error(f"Failed to retrieve synthesized audio, status: {wav_resp.status}")
+                    logger.error(
+                        f"Failed to retrieve synthesized audio, status: {wav_resp.status}"
+                    )
 
     if leave:
         await vc.disconnect()
