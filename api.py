@@ -9,7 +9,7 @@ from typing import List
 
 import torch
 import numpy as np
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 import whisper
 from ollama import chat
@@ -52,7 +52,27 @@ whisper_model = whisper.load_model("turbo")
 os.makedirs("voices", exist_ok=True)
 logger.info("Downloading Piper voice...")
 download_voice("ro_RO-mihai-medium", download_dir=Path(os.getcwd()) / "voices")
-voice = PiperVoice.load("voices/ro_RO-mihai-medium.onnx")
+download_voice("en_US-lessac-medium", download_dir=Path(os.getcwd()) / "voices")
+
+VOICE_MAP = {
+    "ro": PiperVoice.load("voices/ro_RO-mihai-medium.onnx"),
+    "en": PiperVoice.load("voices/en_US-lessac-medium.onnx"),
+}
+
+PROMPT_MAP = {
+    "ro": """Ești un bot sarcastic, care provoacă furie prin meme-uri.
+Treaba ta este să iei următorul transcript și să-l faci praf cu umor negru, sarcasm sau comentarii de tip meme.
+Fii scurt, la obiect și amuzant — ca și cum ai posta o legendă de meme sau un răspuns de trolling.
+Nu te explica, doar dă roast-ul. Maxim 200 de caractere. Folosește emoji-uri și slang.
+Transcript: ```{}```
+Răspunsul trebuie să fie în limba română.""",
+    "en": """You are a sarcastic bot that provokes rage through memes.
+Your job is to take the following transcript and roast it with dark humor, sarcasm, or meme-style comments.
+Be brief, to the point, and funny — like you're posting a meme caption or a trolling reply.
+Don't explain yourself, just deliver the roast. Max 200 characters. Use emojis and slang.
+Transcript: ```{}```
+The reply must be in English.""",
+}
 
 
 # ----------------------------
@@ -90,7 +110,7 @@ def load_audio_bytes(audio_bytes: bytes, sr: int = SAMPLE_RATE) -> np.ndarray:
     return audio
 
 
-def chunk_and_transcribe(audio_bytes: bytes, model) -> str:
+def chunk_and_transcribe(audio_bytes: bytes, model, language: str = "en") -> str:
     """
     Split audio into chunks of MAX_DURATION_MS and transcribe each chunk.
     Returns the full concatenated transcript.
@@ -106,24 +126,20 @@ def chunk_and_transcribe(audio_bytes: bytes, model) -> str:
             continue
 
         logger.info(f"Processing audio chunk starting at sample {start}")
-        result = model.transcribe(chunk, language="ro", fp16=False)
+        result = model.transcribe(chunk, language=language, fp16=False)
         logger.info(f"Chunk transcription result: {result['text']}")
         full_text += result["text"] + " "
 
     return full_text.strip()
 
 
-def ragebait(transcript: str) -> str:
+def ragebait(transcript: str, language: str = "en") -> str:
     """
     Generate a sarcastic meme-style response based on the transcript
     using Ollama chat model.
     """
-    prompt = f"""Ești un bot sarcastic, care provoacă furie prin meme-uri.
-Treaba ta este să iei următorul transcript și să-l faci praf cu umor negru, sarcasm sau comentarii de tip meme.
-Fii scurt, la obiect și amuzant — ca și cum ai posta o legendă de meme sau un răspuns de trolling.
-Nu te explica, doar dă roast-ul. Maxim 200 de caractere. Folosește emoji-uri și slang.
-Transcript: ```{transcript}```
-Răspunsul trebuie să fie în limba română."""
+    prompt = PROMPT_MAP[language].format(transcript)
+    logger.info(f"Ragebait prompt: {prompt}")
 
     response = chat(
         model=MODEL_NAME,
@@ -138,7 +154,10 @@ Răspunsul trebuie să fie în limba română."""
 # API endpoints
 # ----------------------------
 @app.post("/bait")
-async def process_audio(files: List[UploadFile] = File(...)):
+async def process_audio(
+    files: List[UploadFile] = File(...),
+    language: str = Query(default="en", alias="language"),
+):
     """
     Accept a WAV file, transcribe it, generate a ragebait text, and
     synthesize it to WAV using Piper.
@@ -151,7 +170,7 @@ async def process_audio(files: List[UploadFile] = File(...)):
         )
 
         # Transcription
-        transcript = chunk_and_transcribe(audio_bytes, whisper_model)
+        transcript = chunk_and_transcribe(audio_bytes, whisper_model, language=language)
 
         # Use filename (without extension) as username
         username = file.filename.rsplit(".", 1)[0]
@@ -163,11 +182,12 @@ async def process_audio(files: List[UploadFile] = File(...)):
     transcript = "\n".join(full_transcript_parts)
 
     # Generate ragebait text
-    text = ragebait(transcript)
+    text = ragebait(transcript, language=language)
 
     # Synthesize audio
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
+        voice = VOICE_MAP[language]
         voice.synthesize_wav(text, wav_file)
 
     # Store audio in memory

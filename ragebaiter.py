@@ -15,6 +15,7 @@ dotenv.load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 TESTING_GUILD_ID = int(os.getenv("TESTING_GUILD_ID", "1412415259683196970"))
 RAGEBAITER_API_URL = os.getenv("RAGEBAITER_API_URL", "http://localhost:8000")
+RAGEBAITER_LANGUAGE = os.getenv("RAGEBAITER_LANGUAGE", "en")
 
 # ----------------------------
 # Logging setup
@@ -173,7 +174,7 @@ async def once_done(sink: discord.sinks, channel: discord.TextChannel, vc, leave
         )
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(RAGEBAITER_API_URL + "/bait", data=form_data) as resp:
+        async with session.post(RAGEBAITER_API_URL + "/bait", data=form_data, params={"language": RAGEBAITER_LANGUAGE}) as resp:
             if resp.status != 200:
                 logger.error(f"Failed to send audio to API, status: {resp.status}")
                 return
